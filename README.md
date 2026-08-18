@@ -221,6 +221,72 @@ So when depth 3 is out of reach, the useful moves are not "wait longer":
 If you see `EXCEEDS L2` in the header, move the split or shorten the leading positional lists
 before you wait ten hours to find out what it cost.
 
+## When the hash stops being the constraint
+
+Everything above searches names as combinations of dictionary words, and that is the right shape
+only while a name is short. Measured on 22 481 recovered Black Ops 4 names, the median name has
+**nine** words and only 4.4% have three or fewer. With a 50 000 word vocabulary the space passes
+2^60 at 3.8 words - so for the overwhelming majority of real names there are more word sequences
+than there are hashes, roughly 2^80 of them per target, every one an equally valid preimage.
+
+That is worth stating plainly because it decides where effort goes. Past four words the hash is a
+checksum, not a filter: no arithmetic can pick the true name out of 2^80 arithmetically identical
+ones. Only a prior can. Making the search faster cannot help, and the measurements in the section
+above show there was not much speed left to find anyway.
+
+`mitm_frag.cu` is the answer to that. It searches **fragments** instead of words - every prefix and
+every suffix cut at a separator out of the names already known - and joins them by meeting in the
+middle on the 60-bit state, which FNV-1a permits because it is invertible. A missing name that
+recombines known parts falls out immediately.
+
+Two properties make it work:
+
+- **It is precise by construction.** 883 488 prefixes against 3 107 168 suffixes over 50 635
+  targets is 2.7e12 pairs, and 2.7e12 pairs is 0.12 expected false matches for the entire run.
+  Compare a word search, where the space is so much larger than 2^60 that most matches are noise.
+- **The two sides cost differently.** A prefix costs sixteen bytes of table; a suffix costs a
+  backward walk against every target. Reach is bought on the prefix side.
+
+Results on the same 50 635 unresolved hashes, each round feeding its finds back in as corpus:
+
+| | names | share of targets | time |
+|---|---|---|---|
+| word search, depth 2, prefix table | 4 470 | 8.8% | 10 h 09 min |
+| fragments, recombination only | 641 | 1.3% | 19 s |
+| + generic 256-word extension | 1 857 | 3.7% | 35 s |
+| + per-prefix bigram continuations | 5 748 | 11.3% | 32 s |
+| + four feedback rounds | **9 478** | **18.6%** | 32 s each |
+
+The jump from a generic extension to per-prefix continuations is the whole argument in one line:
+2.4x the names for less than half the search, because offering `i_c_t8_mp_spe_` the words that
+have actually followed `spe` beats offering it the 256 commonest words in the game.
+
+Everything reported here was recomputed and checked with `tools/verify_names.py`. That is not
+ceremony: at a continuation cap of 512 the slot index overflowed eight bits into the prefix index,
+and 355 of 8 125 reported names came back as the wrong string. They still matched a target state,
+so nothing but recomputing the hash could have caught it.
+
+### Running it
+
+```
+python tools/build_fragments.py known.csv found_so_far.txt --out-dir w --cap 512
+./mitm_frag --prefixes w/prefixes.txt --suffixes w/suffixes.txt --targets targets.txt             --extend w/words.txt --cont-offset w/cont_offset.bin --cont-index w/cont_index.bin             --out found.txt
+python tools/verify_names.py --targets targets.txt --names found.txt --slash --csv found.csv
+```
+
+Then put `found.txt` back on the `build_fragments.py` command line and run it again. The rounds
+compound and then saturate - 5 748, 7 966, 8 963, 9 413, 9 478 - and when the increment falls off
+the corpus has given what it has.
+
+### One more free factor of sixteen
+
+The stored hash is truncated to 60 bits, so the top four bits of the state are gone, and the
+obvious reading is that any backward pass must try all sixteen. `codehash` does exactly that. It
+does not have to: multiplication mod 2^64 truncated to 60 bits equals multiplication mod 2^60 of
+the truncated operands, and a byte XOR cannot reach bit 60, so the whole chain is closed under
+truncation. `mitm_frag` runs entirely mod 2^60 and skips the sixteen guesses. Verified against the
+full 64-bit computation over three thousand random splits.
+
 ## What does not help
 
 Measured on the 3090 rather than reasoned about, because the reasoning was wrong twice.
@@ -270,7 +336,9 @@ cheaper probe - would be aiming at the right thing.
 ## Files
 
 ```
-codehash.cu                       the searcher
+codehash.cu                       word-combination searcher, for short names
+mitm_frag.cu                      fragment meet in the middle, for everything else
+tools/build_fragments.py          cut a corpus into prefixes, suffixes and continuations
 tools/build_positional_dict.py    per-position dictionaries from known names
 tools/verify_names.py             recompute and check, plus collision reporting
 ```
