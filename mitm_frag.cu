@@ -128,10 +128,13 @@ __global__ void Build(const char* __restrict__ pText, const uint32_t* __restrict
                 h = ((h ^ (uint64_t)'_') * FNV_P) & MASK60;
             }
 
-            // Sixteen bits for the continuation slot, not eight. At a cap of 512 the slot
-            // overflowed into the prefix index and 355 of 8125 reported names were the wrong
-            // string - they still matched a target state, so only recomputing the hash caught it.
-            const uint64_t id = ((uint64_t)p << 16) | (uint64_t)k;
+            // Twenty-four bits for the continuation slot. It has overflowed twice: eight bits
+            // lost 355 names of 8125 at a cap of 512, and sixteen lost 49 of 15 562 once the
+            // commonest prefixes were handed the whole 167 631 word vocabulary. Both times the
+            // wrong string still matched a target state, so nothing but recomputing the hash
+            // could tell. Twenty-four bits leaves room for a vocabulary sixty times larger, and
+            // a prefix index of twenty bits alongside it still fits a uint64 twice over.
+            const uint64_t id = ((uint64_t)p << 24) | (uint64_t)k;
             uint32_t slot = Slot(h, mask);
             for (;;) {
                 const uint64_t old = atomicCAS((unsigned long long*)&keys[slot],
@@ -363,8 +366,8 @@ int main(int argc, char** argv)
     if (!outPath.empty()) out.open(outPath);
     for (uint32_t i = 0; i < kept; i++) {
         const uint64_t id = hits[i * 2];
-        const uint64_t p  = id >> 16;
-        const uint64_t k  = id & 0xFFFFull;
+        const uint64_t p  = id >> 24;
+        const uint64_t k  = id & 0xFFFFFFull;
 
         std::string name = prefixes[(size_t)p];
         if (k) name += words[contIdx[contOff[(size_t)p] + (size_t)k - 1]] + "_";

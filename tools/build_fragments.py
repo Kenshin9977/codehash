@@ -58,6 +58,14 @@ def main():
     ap.add_argument('--deep-top', type=int, default=0, metavar='N',
                     help='give the N commonest prefixes a bigger continuation list than the rest')
     ap.add_argument('--deep-cap', type=int, default=4096)
+    ap.add_argument('--bigram-cap', type=int, default=0, metavar='C',
+                    help='additionally offer each prefix its C likeliest two-word continuations. '
+                         'Nothing requires a continuation to be one word, so this reaches names '
+                         'with a wholly new two-word middle at the same cost per entry')
+    ap.add_argument('--full-vocab-top', type=int, default=0, metavar='N',
+                    help='give the N commonest prefixes every word in the vocabulary. Meant for '
+                         'directory prefixes: there are only 275 of them, so a complete sweep of '
+                         'that shape is affordable where it would not be for anything longer')
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -67,6 +75,8 @@ def main():
     prefix = collections.Counter()
     suffix = collections.Counter()
     follow = collections.defaultdict(collections.Counter)
+    follow2 = collections.defaultdict(collections.Counter)
+    vocabulary = collections.Counter()
 
     for name in names:
         for i, ch in enumerate(name):
@@ -74,9 +84,15 @@ def main():
                 prefix[name[:i + 1]] += 1
                 suffix[name[i + 1:]] += 1
 
+        for token in name.replace('/', '_').split('_'):
+            if token:
+                vocabulary[token] += 1
+
         tokens = [t for t in name.replace('/', '_').split('_') if t]
         for a, b in zip(tokens, tokens[1:]):
             follow[a][b] += 1
+        for a, b, c in zip(tokens, tokens[1:], tokens[2:]):
+            follow2[a][b + '_' + c] += 1
 
     # Ordered by frequency throughout, which is the whole prior: where two fragments collide on a
     # state the commoner one wins, and a truncated list keeps the likelier half.
@@ -93,11 +109,21 @@ def main():
     vocab = {}
     offsets = [0]
     index = []
+    common = [w for w, _ in vocabulary.most_common()]
+
     for rank, p in enumerate(prefixes):
         cap = args.deep_cap if rank < args.deep_top else args.cap
         tokens = [t for t in p.rstrip('_/').replace('/', '_').split('_') if t]
         last = tokens[-1] if tokens else ''
-        for word, _ in follow.get(last, collections.Counter()).most_common(cap):
+
+        offered = [w for w, _ in follow.get(last, collections.Counter()).most_common(cap)]
+        if rank < args.full_vocab_top:
+            offered = common
+        if args.bigram_cap:
+            offered = offered + [w for w, _ in
+                                 follow2.get(last, collections.Counter()).most_common(args.bigram_cap)]
+
+        for word in offered:
             if word not in vocab:
                 vocab[word] = len(vocab)
             index.append(vocab[word])

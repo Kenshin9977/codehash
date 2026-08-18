@@ -256,9 +256,26 @@ Results on the same 50 635 unresolved hashes, each round feeding its finds back 
 | + generic 256-word extension | 1 857 | 3.7% | 35 s |
 | + per-prefix bigram continuations | 5 748 | 11.3% | 32 s |
 | + four feedback rounds | 9 478 | 18.6% | 32 s each |
-| + continuation budget by prefix frequency | **13 293** | **26.1%** | 32 s each |
+| + continuation budget by prefix frequency | 13 293 | 26.1% | 32 s each |
+| + whole vocabulary for directory prefixes | 13 687 | 27.0% | 40 s |
+| + two-word continuations | **15 607** | **30.6%** | 37 s each |
 
-The last row is worth its own sentence. Spreading the continuation budget evenly over prefixes
+Two rows deserve a note.
+
+**Two new words costs nothing extra.** The obvious way to reach a name with a wholly new two-word
+middle is to extend the suffix side as well, and that is unaffordable: every suffix is walked
+against every target, so multiplying the suffix count multiplies both the run time and, fatally,
+the false-match count. But nothing requires a continuation to be one word. Putting the likeliest
+two-word sequences in the continuation vocabulary reaches the same names for the same cost per
+entry and never touches the suffix side - 37 seconds, and 1 112 more names.
+
+**Directory prefixes can be swept exhaustively.** There are 275 of them in the corpus and they
+head 21% of what this search recovers, so handing the commonest few hundred prefixes the entire
+167 631 word vocabulary rather than a capped list is affordable where it would not be for anything
+longer. Backslashes must be folded to forward slashes first: the games hash paths with forward
+slashes, and a name written the other way hashes to something else entirely.
+
+The earlier note about budget allocation: Spreading the continuation budget evenly over prefixes
 treats a word offered to `mc/` as worth the same as one offered to
 `i_c_t8_mp_spe_outrider_apocalypse_`, and it is not: the short one heads a great many names. Giving
 the commonest twenty thousand prefixes a deeper list costs nothing measurable and found 3 800 more
