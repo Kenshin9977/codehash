@@ -360,12 +360,53 @@ chasing 5%, and it would cost bucketing every stem by its residue class to keep 
 row. Not worth it. Someone attacking the fixed 95% - a smaller dictionary entry than 32 bytes, a
 cheaper probe - would be aiming at the right thing.
 
+## Black Ops 3, a 32-bit hash and a different shape of search
+
+`t7sweep.cu` composes plausible identifiers and checks them against Black Ops 3 script hashes.
+Treyarch's canonical hash is FNV-1a 32-bit - seed `0x4B9ACE2F`, prime `0x1000193`, lowercased,
+with one extra multiply at the end - and thirty-two bits changes the problem in both directions.
+
+**Against it.** The hash stops being evidence when there are many targets: expected false matches
+are `candidates * targets / 2^32`, which allows 4.8e9 candidates against 90 targets and 1.5e7
+against 25 000. A blanket sweep returns noise, so this is used one batch at a time, the batches
+ranked by how often a hash appears in the decompiled scripts (`tools/t7_context.py`).
+
+**For it.** The whole space fits: 2^32 bits is 512 MB, so membership is an exact bitmap, not a
+filter. No structural false positives at all - a hit is a real preimage of a real target. Measured
+at **6.6e9 candidates/s** on an RTX 3090, and validated by hiding 30 known two-word names among
+the targets and getting all 30 back, at 1.4 candidates per target.
+
+What a campaign returns, against the hashes acts cannot name:
+
+| batch | targets | candidates | expected false | hits |
+|---|---|---|---|---|
+| two words, full vocabulary | 102 | 1.6e9 | 38 | 61 |
+| observed prefix + one word | 102 | 6.9e9 | 163 | 183 |
+| two words, 6 000 words | 4 201 | 3.6e7 | 35 | 514 |
+| observed prefix + one word | 4 201 | 1.0e9 | 1 009 | 2 026 |
+| three words, 1 500 words | 102 | 3.4e9 | 80 | 74 |
+
+The last row is the lesson: 74 hits against 80 expected false is noise, and no amount of GPU makes
+it otherwise. The third row is the opposite - 514 hits against 35 expected false - and it is the
+same tool, run where the arithmetic allows.
+
+Surviving names are filtered before they are kept: a single candidate for the target, no run of
+hex digits, every token common in the corpus. That took 2 026 raw hits down to 1 047, and what
+comes through reads like what it is - `zombie_soul_fx`, `margwa_defense_fx`, `damage_state_fx`.
+
+Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **69.6%** where the
+published list covers 34.7%. 24 104 remain, of which 2 922 appear more than five times.
+
 ## Files
 
 ```
 codehash.cu                       word-combination searcher, for short names
 mitm_frag.cu                      fragment meet in the middle, for everything else
+t7sweep.cu                        Black Ops 3 identifier sweep against an exact 32-bit bitmap
 tools/build_fragments.py          cut a corpus into prefixes, suffixes and continuations
+tools/t7_hash.py                  the Black Ops 3 hash, and building its name table by harvest
+tools/t7_context.py               rank unnamed script hashes by use, with their surrounding code
+tools/read_wni.py                 read the community archive format
 tools/build_positional_dict.py    per-position dictionaries from known names
 tools/verify_names.py             recompute and check, plus collision reporting
 ```

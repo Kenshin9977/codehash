@@ -64,6 +64,12 @@ def t7_hash(text):
     return (value * PRIME) & MASK32
 
 
+# What a decompiler writes when it does not know: var_49dbff, function_ef0ce9fb, namespace_36e5.
+# These hash to something and so pass verification, but they are placeholders, not names, and a
+# table full of them is worse than useless - it answers a hash with the fact that it is unknown.
+PLACEHOLDER = re.compile(r'^(?:var|function|namespace|hash|event|class|method)_[0-9a-f]{6,16}$')
+
+
 def identifiers(text):
     """Everything in a script that might be hashed: names, string literals, script paths."""
     found = set()
@@ -71,7 +77,7 @@ def identifiers(text):
     found.update(m.lower() for m in re.findall(r'"([^"\n]{3,64})"', text))
     # A script path is hashed whole, separators and all.
     found.update(m.lower() for m in re.findall(r'[A-Za-z0-9_]+(?:[\\/][A-Za-z0-9_]+)+', text))
-    return found
+    return {f for f in found if not PLACEHOLDER.match(f)}
 
 
 def harvest(paths):
@@ -135,7 +141,7 @@ def main():
         for digest, name in read_pairs(path).items():
             # Only entries that recompute go in. A published list can carry a wrong casing or a
             # different variant, and a name table nobody can verify is worth less than none.
-            if t7_hash(name) == digest:
+            if t7_hash(name) == digest and not PLACEHOLDER.match(name.lower()):
                 table[digest] = name
                 kept += 1
         print('  %-28s %6d verified, +%d new' % (os.path.basename(path), kept,
