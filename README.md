@@ -13,7 +13,7 @@ because that one is not bound by the hashing: it writes eight bytes per candidat
 buffer and copies the buffer back to be scanned on the CPU, which caps a run near 10^9 candidates
 a second no matter how cheap the arithmetic gets. Removing that cap is most of what is here.
 
-Measured on an RTX 3090: **1.08e10 candidates/s.** The command that produces that figure is in
+Measured on an RTX 3090: **1.28e10 candidates/s.** The command that produces that figure is in
 [Throughput](#throughput), so you can check it on your own card rather than take the number.
 
 ## The hash
@@ -95,6 +95,7 @@ nothing, and reports nothing; it is the single most likely way to waste a run.
 | `--depth N` | how many dictionary words to compose. Cost is `prefixes * words^depth` |
 | `--mitm K` | meet in the middle, forward over the first K words. The hash is invertible, so the two halves can be met in a table |
 | `--prefix-table` | build a table of known prefixes and search backwards from the targets |
+| `--bitmap-bits N` | membership bitmap size, as a power of two. 18 measured best - see [What does not help](#what-does-not-help) |
 | `--chunk N` | stems per launch. Default 2^23 suits a headless box. **Drop to about 2^20 on Windows or any GPU driving a display**, where a kernel that outruns the driver's 2-second timeout is killed along with the process |
 
 ### A run, end to end
@@ -154,7 +155,7 @@ Measured on an RTX 3090, one prefix, a flat 50 000-word dictionary at depth 2:
 ```
 $ ./codehash --targets targets.txt --dict dict_50000.txt --prefix i_c_t8_mp_spe_ --depth 2
 depth 2: 2.5e+09 candidates, ~0.0 expected false hits
-  0.2 s, 1.08e+10 candidates/s, 0 hit(s)
+  0.2 s, 1.28e+10 candidates/s, 0 hit(s)
 ```
 
 Two caveats worth stating plainly. That is the flat search, where every candidate costs one leaf
@@ -193,12 +194,14 @@ positional vocabularies of 5 000 and 50 000 words, on one RTX 3090:
 |---|---|---|---|
 | depth 2, prefix table over 3.0M prefixes | 4.05e10 stems | **10 h 09 min**, 4 470 names | timed |
 | depth 3, same mode | 2.03e15 stems | **~58 years** | from that run's rate |
-| depth 3, flat, one fixed prefix | 1.25e13 candidates | **~20 min** | from the flat rate above |
+| depth 3, flat, one fixed prefix | 1.25e13 candidates | **12 min 47 s** | timed |
 
-Only the first row is a stopwatch reading. The other two divide the work by a rate measured on
-this card, which is the right way round: the point of the table is that the difference between
-them is six orders of magnitude, and no amount of precision on the second row changes what to do
-about it.
+Only the middle row is arithmetic - the work divided by the rate the first row ran at. Nobody is
+going to time fifty-eight years, and no precision on that figure changes what to do about it.
+
+The flat run reaches 1.63e10 candidates/s, above the 1.28e10 of the depth 2 measurement above,
+because a deeper search amortises the per-stem setup over more leaves. That 12 min 47 s was timed
+before `--bitmap-bits` moved to 18, so it is if anything pessimistic now.
 
 The second row is not a longer run, it is a different problem, and it is worth understanding why
 the third row is so much cheaper. The prefix-table mode works backwards from the targets against a
@@ -217,6 +220,52 @@ So when depth 3 is out of reach, the useful moves are not "wait longer":
 
 If you see `EXCEEDS L2` in the header, move the split or shorten the leading positional lists
 before you wait ten hours to find out what it cost.
+
+## What does not help
+
+Measured on the 3090 rather than reasoned about, because the reasoning was wrong twice.
+
+**A bigger membership bitmap.** With 50 635 targets in 2^17 bits the false positive rate is 38.6%,
+which sounds ruinous - more than a third of candidates go on to probe the table. Doubling the
+bitmap halves the rate and gains 5%; doubling it again cuts the rate to 9.7% and costs a factor of
+two, because 64 KB of shared memory leaves one block per SM and occupancy collapses from 83% to
+16%. 2^18 is the sweet spot and it is worth 5%, not 2x.
+
+| `--bitmap-bits` | false positives | occupancy | rate |
+|---|---|---|---|
+| 17 | 38.6% | 83% | 1.66e10/s |
+| 18 | 19.3% | 50% | **1.75e10/s** |
+| 19 | 9.7% | 16% | 7.72e9/s |
+
+**Making the hash itself cheaper.** Three dictionaries of 5 000 words each, identical in every way
+but word length:
+
+| mean word length | rate |
+|---|---|
+| 3.5 | 1.67e10/s |
+| 7.5 | 1.64e10/s |
+| 15.5 | 1.55e10/s |
+
+4.4x the characters costs 7%. Solving for the two terms, a character is worth 0.66% of the fixed
+per-candidate cost, so at a realistic 7.5 characters **the hashing is about 5% of the runtime**.
+Whatever is setting the pace, it is not the arithmetic - it is the per-leaf dictionary load, the
+bitmap probe and the loop around them.
+
+That measurement retires an optimisation that looked excellent on paper. FNV-1a decomposes: for a
+word `w` of length `L`,
+
+```
+Hash(h, w) = h * P^L + F(h mod 128, w)
+```
+
+The word's whole contribution depends on the running state through **seven bits** and nothing else
+- verified exhaustively over the low byte and across word lengths from 1 to 31. So a table of
+128 rows by dictionary size turns a leaf of any length into one multiply, one lookup and one add,
+and the multiply hoists out if the dictionary is sorted by length. It is a real property and it is
+the reason FNV should never be used where preimages matter. As a speed optimisation here it is
+chasing 5%, and it would cost bucketing every stem by its residue class to keep a warp reading one
+row. Not worth it. Someone attacking the fixed 95% - a smaller dictionary entry than 32 bytes, a
+cheaper probe - would be aiming at the right thing.
 
 ## Files
 

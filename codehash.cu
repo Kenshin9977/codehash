@@ -424,7 +424,10 @@ struct Options {
     std::string targets, dict, prefix, prefixFile, prefixTable, out;
     int depthMin = 1, depthMax = 3;
     int mitm = 0;                 // --mitm K: meet in the middle, forward over the first K words
-    int bitmapBits = 17;          // 2^17 bits = 16 KB, which still lets six blocks sit on an SM
+    // 2^18 bits = 32 KB. Measured: 17 leaves the false positive rate at 38.6% against fifty
+    // thousand targets, 19 cuts it to 9.7% but 64 KB of shared memory allows one block per SM and
+    // costs a factor of two in occupancy. 18 is the turning point, and worth 5% over 17.
+    int bitmapBits = 18;
     // Stems per launch. Sized for a headless Linux box, where a kernel may run as long as it
     // likes: fewer, larger launches means less launch overhead and fewer host synchronisations.
     // Lower it to about 1<<20 on Windows, or anywhere the GPU also drives a display - there a
