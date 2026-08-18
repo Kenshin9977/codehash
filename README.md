@@ -456,6 +456,43 @@ you only look at the hash. `--min-length` is the whole defence: coincidence is u
 corpus and lands in its short mixed-case runs, while a name still unresolved after every published
 list and every decompilation is never three characters long.
 
+### When there is nothing left to recover, label instead
+
+Every source has now been tried and measured, and the last ones came back near-empty: the community
+script repositories and hash lists give **43** names between them - `Jake-NotTheMuss/t7-hashes`,
+`shiversoftdev/t7-source` and the rest are already fully absorbed - of which 41 come from the one
+source never tested before, a mirror of the official Black Ops 3 Mod Tools, whose
+`share/raw/scripts` ships real Treyarch plaintext.
+
+So roughly twenty-one thousand hashes are unrecoverable in the strict sense: 32 bits cannot
+arbitrate a search wide enough to reach them, and no surviving artefact spells the names out.
+
+`tools/t7_label.py` answers a different question. `var_1a2b3c4d` is not unreadable because the name
+is missing - it is unreadable because the placeholder throws away everything the code *does* say:
+what the hash is (a field, an event, a function, a table key), which namespace uses it most, and
+which known identifiers keep appearing beside it. Feed those back in and a script becomes legible:
+
+```gsc
+level.var_5db32b5b = [];                             // before
+namespace_dabbe128::function_eb99da89( &function_fb4f96b5 );
+
+level.a_e_speakers = [];                             // after
+callback::on_connect( &on_player_connect );
+level.x_fld_zm_castle_vo_vox_grop_groph_addit_169991e1 = 0;
+level thread x_fn_zm_castle_vo_7884e6b8();
+```
+
+The first two lines are recovered names; the last two are labels. Three rules keep them apart, and
+they are the whole design: the **`x_` prefix** means a label can never be mistaken for a recovered
+name; the **hex suffix** keeps the original hash in the label, so it stays reversible, auditable and
+unique however similar two contexts are; and labels live in **their own file** and never enter the
+verified table, because everything this repository calls a name recomputes to its hash and a label
+does not. If a real name turns up later it simply supersedes the label - the hash is right there
+in it.
+
+Of the 21 572 labelled, the code identifies 11 151 as functions, 9 002 as fields, 1 285 as events
+and 132 as table keys.
+
 ### Other games
 
 Hashing the names the community publishes for Black Ops 4, Cold War, Black Ops 6 and Modern
@@ -464,7 +501,8 @@ Warfare III against the Black Ops 3 hashes resolves **161** - `bgb_acquire_name`
 resemblance showing. It is a free test and worth running; it is not a seam.
 
 Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **72.7%** where the
-published list covers 34.7% - 30 117 names beyond what the community has published. 21 609 remain.
+published list covers 34.7% - 30 158 names beyond what the community has published. 21 572 remain,
+and `tools/t7_label.py` labels every one of them.
 
 ## Files
 
@@ -478,6 +516,7 @@ tools/t7_context.py               rank unnamed script hashes by use, with their 
 tools/t7_propose.py               name unknowns by mutating the resolved names beside them
 tools/t7_from_rawfiles.py         name unknowns from the game's non-script files, where the
                                   declaring side of an event or a table entry ships in the clear
+tools/t7_label.py                 label what cannot be recovered, from what the code says about it
 tools/read_wni.py                 read the community archive format
 tools/build_positional_dict.py    per-position dictionaries from known names
 tools/verify_names.py             recompute and check, plus collision reporting
