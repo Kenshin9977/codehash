@@ -394,8 +394,45 @@ Surviving names are filtered before they are kept: a single candidate for the ta
 hex digits, every token common in the corpus. That took 2 026 raw hits down to 1 047, and what
 comes through reads like what it is - `zombie_soul_fx`, `margwa_defense_fx`, `damage_state_fx`.
 
-Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **69.6%** where the
-published list covers 34.7%. 24 104 remain, of which 2 922 appear more than five times.
+### Local beats global
+
+Sweeping a 40 000 word vocabulary is the wrong shape for this. A file's own identifiers are a far
+better dictionary for the hashes inside that file, and because each file holds only a few dozen
+targets, the false-match budget per file is enormous. Two local tokens returned 554 names from
+2.5e7 candidates - a sweep small enough to run in Python - and three local tokens, one GPU pass
+per file over 1 031 files, returned 1 149 more.
+
+What comes out arrives in families, which is the sign it is right: `res_hunters_wave2` beside
+`port_hunters_wave2`, `silverback_health_think` beside `silverback_attack_think`,
+`redins_challenge_failure` beside `tankmaze_challenge_failure`.
+
+### Proposing instead of sweeping
+
+`tools/t7_propose.py` goes further and stops composing from a dictionary at all. It mutates the
+names already resolved in the same file - step a trailing number, swap one token for another the
+file uses, drop a leading or trailing token, join one local name's head to another's tail - and
+recovered 404 names from 1.6e7 candidates. A thousand times fewer candidates than a global sweep,
+for a comparable return, and the names are unmistakable: `depth_charge_init`,
+`dragon_boss_intro_done`, `hijack_tutorial_success_vo`.
+
+This is where a model belongs in the problem, and it is not where anyone expects. Nothing here
+cracks a hash. It proposes, and the hash verifies for free and exactly - so a bad proposal costs
+only the microsecond that rejected it, and the only thing that matters is how well the proposals
+are aimed.
+
+It also exhausts immediately. Re-running the proposer after folding its own finds back in returns
+**zero**: the mutations are deterministic, so a name reached by mutation mutates back into the set
+it came from. Going further needs new transformation families, not more rounds.
+
+### Other games
+
+Hashing the names the community publishes for Black Ops 4, Cold War, Black Ops 6 and Modern
+Warfare III against the Black Ops 3 hashes resolves **161** - `bgb_acquire_name`, `n_perk_index`,
+`lightning_arc_play_fx`. Black Ops 4 and Cold War supply most of it, which is the family
+resemblance showing. It is a free test and worth running; it is not a seam.
+
+Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **72.1%** where the
+published list covers 34.7%. 22 061 remain, of which 2 768 appear more than five times.
 
 ## Files
 
@@ -406,6 +443,7 @@ t7sweep.cu                        Black Ops 3 identifier sweep against an exact 
 tools/build_fragments.py          cut a corpus into prefixes, suffixes and continuations
 tools/t7_hash.py                  the Black Ops 3 hash, and building its name table by harvest
 tools/t7_context.py               rank unnamed script hashes by use, with their surrounding code
+tools/t7_propose.py               name unknowns by mutating the resolved names beside them
 tools/read_wni.py                 read the community archive format
 tools/build_positional_dict.py    per-position dictionaries from known names
 tools/verify_names.py             recompute and check, plus collision reporting
