@@ -55,6 +55,9 @@ def main():
                     help='most continuations to offer one prefix (512). The slot index is stored '
                          'in sixteen bits, so anything up to 65535 is safe')
     ap.add_argument('--max-fragment', type=int, default=120)
+    ap.add_argument('--deep-top', type=int, default=0, metavar='N',
+                    help='give the N commonest prefixes a bigger continuation list than the rest')
+    ap.add_argument('--deep-cap', type=int, default=4096)
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -80,13 +83,21 @@ def main():
     prefixes = [f for f, _ in prefix.most_common() if 0 < len(f) <= args.max_fragment]
     suffixes = [f for f, _ in suffix.most_common() if 0 < len(f) <= args.max_fragment]
 
+    # Budget by probability mass, not evenly.
+    #
+    # A short prefix stands in front of a great many names, so a word offered to it is worth far
+    # more than the same word offered to something long and specific. Directory prefixes make the
+    # case: there are 275 of them in the whole corpus, they head only 3% of known names - and 21%
+    # of the names this search recovers. Giving that handful a deep list costs nothing measurable
+    # and reaches the shape they are over-represented in.
     vocab = {}
     offsets = [0]
     index = []
-    for p in prefixes:
+    for rank, p in enumerate(prefixes):
+        cap = args.deep_cap if rank < args.deep_top else args.cap
         tokens = [t for t in p.rstrip('_/').replace('/', '_').split('_') if t]
         last = tokens[-1] if tokens else ''
-        for word, _ in follow.get(last, collections.Counter()).most_common(args.cap):
+        for word, _ in follow.get(last, collections.Counter()).most_common(cap):
             if word not in vocab:
                 vocab[word] = len(vocab)
             index.append(vocab[word])

@@ -255,7 +255,15 @@ Results on the same 50 635 unresolved hashes, each round feeding its finds back 
 | fragments, recombination only | 641 | 1.3% | 19 s |
 | + generic 256-word extension | 1 857 | 3.7% | 35 s |
 | + per-prefix bigram continuations | 5 748 | 11.3% | 32 s |
-| + four feedback rounds | **9 478** | **18.6%** | 32 s each |
+| + four feedback rounds | 9 478 | 18.6% | 32 s each |
+| + continuation budget by prefix frequency | **13 293** | **26.1%** | 32 s each |
+
+The last row is worth its own sentence. Spreading the continuation budget evenly over prefixes
+treats a word offered to `mc/` as worth the same as one offered to
+`i_c_t8_mp_spe_outrider_apocalypse_`, and it is not: the short one heads a great many names. Giving
+the commonest twenty thousand prefixes a deeper list costs nothing measurable and found 3 800 more
+names. Directory prefixes make the case on their own - 275 of them in the whole corpus, heading 3%
+of known names and **21%** of the names this search recovers.
 
 The jump from a generic extension to per-prefix continuations is the whole argument in one line:
 2.4x the names for less than half the search, because offering `i_c_t8_mp_spe_` the words that
