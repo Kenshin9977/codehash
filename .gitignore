@@ -1,0 +1,10 @@
+codehash
+codehash.exe
+*.o
+*.obj
+
+# run inputs and outputs
+*.txt
+*.csv
+!requirements.txt
+dict/
