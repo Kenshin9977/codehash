@@ -424,6 +424,38 @@ It also exhausts immediately. Re-running the proposer after folding its own find
 **zero**: the mutations are deterministic, so a name reached by mutation mutates back into the set
 it came from. Going further needs new transformation families, not more rounds.
 
+### The name is often not in the code at all
+
+Every approach above looks for names inside scripts. `tools/t7_from_rawfiles.py` starts from the
+observation that a script hash is frequently the name of something *another asset* declares:
+
+```gsc
+level waittill( #"hash_a1b2c3d4" );
+```
+
+The script waits on an event. It never spells the event's name. The cinematic scene file that
+raises it does, in plain text, and was never hashed.
+
+So this reads the non-script files instead. Extracting the rawfiles of all 264 Black Ops 3 zones
+gives 11 112 files - localisation string tables, compiled Lua, compiled GSC, gamedata sheets,
+vision files, configs - and sweeping their strings recovers **452** names that no amount of code
+reading would have produced: `hendricks_disappear`, `safehouse_explosion_igc_done`,
+`start_fade_to_white`, `water_drain_complete`, `wolf_broken_arrow_revealed`. Event names, which is
+exactly the category whose declaration lives outside the code.
+
+Two things are worth keeping from the measurement. **Where they come from is lopsided**: 437 of the
+452 sit in `tables/data/strings/*.txt`, the per-map localisation tables. The 3 678 compiled Lua
+files yield 7 and the 3 056 compiled scripts yield none - reading them as bytes to reach their
+constant tables was necessary to know that, and the answer is that it was not worth it.
+
+**And coincidence finally shows up here.** Expected false matches are `candidates * targets / 2^32`,
+so 1.55 million distinct strings against 21 614 targets expects 7.8 - and the unguarded run
+returned exactly seven junk hits: `PfF`, `lzS`, `*PnrE`, `AZoLBm`, `NOX`, `sff`, `*sJS`, short runs
+out of the middle of compiled files, matching by accident and indistinguishable from an answer if
+you only look at the hash. `--min-length` is the whole defence: coincidence is uniform over the
+corpus and lands in its short mixed-case runs, while a name still unresolved after every published
+list and every decompilation is never three characters long.
+
 ### Other games
 
 Hashing the names the community publishes for Black Ops 4, Cold War, Black Ops 6 and Modern
@@ -431,8 +463,8 @@ Warfare III against the Black Ops 3 hashes resolves **161** - `bgb_acquire_name`
 `lightning_arc_play_fx`. Black Ops 4 and Cold War supply most of it, which is the family
 resemblance showing. It is a free test and worth running; it is not a seam.
 
-Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **72.1%** where the
-published list covers 34.7%. 22 061 remain, of which 2 768 appear more than five times.
+Against Black Ops 3's 79 209 unnamed script hashes, this table now covers **72.7%** where the
+published list covers 34.7% - 30 117 names beyond what the community has published. 21 609 remain.
 
 ## Files
 
@@ -444,6 +476,8 @@ tools/build_fragments.py          cut a corpus into prefixes, suffixes and conti
 tools/t7_hash.py                  the Black Ops 3 hash, and building its name table by harvest
 tools/t7_context.py               rank unnamed script hashes by use, with their surrounding code
 tools/t7_propose.py               name unknowns by mutating the resolved names beside them
+tools/t7_from_rawfiles.py         name unknowns from the game's non-script files, where the
+                                  declaring side of an event or a table entry ships in the clear
 tools/read_wni.py                 read the community archive format
 tools/build_positional_dict.py    per-position dictionaries from known names
 tools/verify_names.py             recompute and check, plus collision reporting
