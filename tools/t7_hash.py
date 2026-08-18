@@ -26,6 +26,21 @@ measurement here says how well that works: identifiers taken out of 2 226 decomp
 scripts reproduce **95.8%** of the 31 190 hashes the community has published. Almost everything
 worth naming is already written down somewhere, in a game whose scripts were never hashed or in a
 decompilation of one whose were.
+
+Where it stops. Decompiling every script-bearing zone of Black Ops 3 - 106 of its 264 fastfiles,
+2 438 scripts - leaves 79 209 hashes that acts cannot name. This table names 64.1% of them against
+the community list's 34.7%, and 28 400 stay unnamed.
+
+World at War and Black Ops 1 shipped their scripts in the clear, and Zombie Chronicles remasters
+their maps, so those looked like the obvious next source. They are worth 408 names, 1.4% of what
+is left. The reason is worth keeping: what the older games share with Black Ops 3 was already in
+the Black Ops 3 decompilation this table came from. Old sources only add what disappeared on the
+way - notify strings with spaces in them, mostly, which no decompiler reconstructs.
+
+What remains cannot be swept either. A 32-bit search stays precise only while the targets are few:
+one hundred false matches allows 4.8e9 candidates against 90 targets and 1.5e7 against 28 400.
+That is the exact opposite of the 60-bit case, where more targets helped. Past a few thousand
+targets the hash stops arbitrating and the surrounding code is the only judge left.
 """
 
 import argparse
