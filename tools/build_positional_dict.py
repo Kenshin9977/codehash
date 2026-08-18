@@ -104,7 +104,7 @@ def main():
     print()
     print('  enumeration par probabilite : tronquer chaque liste a K croissant')
     for k in (256, 1024, 4096):
-        print('    K=%-5d profondeur 3 : %.3g candidats' % (k, min(k, flat) ** 3))
+        print('    K=%-5d depth 3: %.3g candidates' % (k, min(k, flat) ** 3))
 
 
 if __name__ == '__main__':

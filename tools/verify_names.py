@@ -96,11 +96,16 @@ def main():
             print('  %s' % name)
 
     if args.csv:
+        # Every name goes in, verified or not, with a column saying which. Writing only the
+        # survivors throws away what you most want when a run disappoints - what it proposed and
+        # how far off it was - and it makes two runs impossible to diff.
         with open(args.csv, 'w', encoding='utf-8', newline='\n') as out:
-            out.write('hash,name\n')
+            out.write('hash,name,verified\n')
             for digest in sorted(hit):
                 for name in sorted(hit[digest]):
-                    out.write('hash_%x,%s\n' % (digest, name))
+                    out.write('hash_%x,%s,yes\n' % (digest, name))
+            for name in sorted(missed):
+                out.write('hash_%x,%s,no\n' % (fnv60(name), name))
         print('\nwrote %s' % args.csv)
 
     return 1 if missed else 0

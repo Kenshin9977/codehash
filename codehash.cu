@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -543,6 +544,51 @@ static std::vector<std::string> SplitPaths(const std::string& s)
     return out;
 }
 
+// How long, in words. Runs here last hours and the interesting question is usually whether a
+// setting has pushed one into years, so the unit changes with the magnitude rather than printing
+// nine hundred thousand seconds and leaving the reader to divide.
+static void FormatDuration(double seconds, char* out, size_t n)
+{
+    if (!(seconds >= 0.0) || seconds > 1e12) { std::snprintf(out, n, "--"); return; }
+
+    if (seconds < 90.0)          std::snprintf(out, n, "%.0fs", seconds);
+    else if (seconds < 5400.0)   std::snprintf(out, n, "%.0fm", seconds / 60.0);
+    else if (seconds < 172800.0) std::snprintf(out, n, "%.1fh", seconds / 3600.0);
+    else if (seconds < 3.15e7)   std::snprintf(out, n, "%.1fd", seconds / 86400.0);
+    else                         std::snprintf(out, n, "%.1fy", seconds / 3.15576e7);
+}
+
+// Progress, with the rate and an estimate of what is left.
+//
+// Worth the few lines because the cost of this search is prefixes * words^depth, and one more
+// dictionary position multiplies the whole run by the size of that position's vocabulary. The
+// difference between a setting that finishes overnight and one that finishes in fifty years is
+// not visible in the arguments, and without an estimate it is not visible until the end either.
+// With one it shows up in the first chunk, while changing your mind is still free.
+//
+// The rate is taken over the whole run rather than over the last chunk. Chunk timings wobble, and
+// a figure that jumps by a factor of two every second is one nobody trusts enough to act on.
+static void ReportProgress(std::chrono::steady_clock::time_point started,
+                           uint64_t done, uint64_t total, const char* unit)
+{
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+
+    double share = total ? 100.0 * (double)done / (double)total : 100.0;
+    char spent[32], left[32];
+    FormatDuration(elapsed, spent, sizeof(spent));
+
+    if (elapsed > 0.5 && done) {
+        const double rate = (double)done / elapsed;
+        FormatDuration((double)(total - done) / rate, left, sizeof(left));
+        std::printf("\r%5.1f%%  %.3g %s/s  elapsed %s  left %s        ",
+                    share, rate, unit, spent, left);
+    } else {
+        std::printf("\r%5.1f%%  elapsed %s        ", share, spent);
+    }
+    std::fflush(stdout);
+}
+
 int main(int argc, char** argv)
 {
     Options o;
@@ -766,6 +812,7 @@ int main(int argc, char** argv)
         CUDA_CHECK(cudaEventCreate(&t1));
         CUDA_CHECK(cudaEventRecord(t0, stream));
 
+        const auto progressFrom = std::chrono::steady_clock::now();
         for (uint64_t begin = 0; begin < bwdStems; begin += (uint64_t)o.chunk) {
             uint64_t end = std::min(bwdStems, begin + (uint64_t)o.chunk);
             MitmBackward<<<grid, block, 0, stream>>>(dDict, pd, 0, depth,
@@ -774,8 +821,7 @@ int main(int argc, char** argv)
                                                      dHitF, dHitB, dHitCount, hitMax);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaStreamSynchronize(stream));
-            std::printf("\r  %5.1f%%", 100.0 * (double)end / (double)bwdStems);
-            std::fflush(stdout);
+            ReportProgress(progressFrom, end, bwdStems, "stems");
         }
         CUDA_CHECK(cudaEventRecord(t1, stream));
         CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -850,7 +896,7 @@ int main(int argc, char** argv)
                         "      positional lists for the leading positions.\n",
                         prop.l2CacheSize >> 20);
         }
-        std::printf("      contre %.3g en recherche directe  (/%.0f)\n",
+        std::printf("      against %.3g for the direct search  (/%.0f)\n",
                     (double)fwdCount * (double)bwdTuples * 1.0,
                     ((double)fwdCount * (double)bwdTuples) / (double)(fwdCount + bwdCount));
 
@@ -880,6 +926,7 @@ int main(int argc, char** argv)
                                                     dKeys, dVals, tableSize - 1);
             CUDA_CHECK(cudaGetLastError());
 
+            const auto progressFrom = std::chrono::steady_clock::now();
             for (uint64_t begin = 0; begin < bwdStems; begin += (uint64_t)o.chunk) {
                 uint64_t end = std::min(bwdStems, begin + (uint64_t)o.chunk);
                 MitmBackward<<<grid, block, 0, stream>>>(dDict, pd, splitAt, depth,
@@ -888,8 +935,7 @@ int main(int argc, char** argv)
                                                          dHitF, dHitB, dHitCount, hitMax);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaStreamSynchronize(stream));
-                std::printf("\r  %5.1f%%", 100.0 * (double)end / (double)bwdStems);
-                std::fflush(stdout);
+                ReportProgress(progressFrom, end, bwdStems, "stems");
             }
 
             CUDA_CHECK(cudaEventRecord(t1, stream));
@@ -912,7 +958,7 @@ int main(int argc, char** argv)
                 std::string name = RebuildMitm(hf[i], hb[i], lists, prefix, splitAt, depth);
                 uint64_t h = FnvString(FNV_OFFSET, name.data(), name.size()) & MASK60;
                 if (!std::binary_search(targets.begin(), targets.end(), h)) {
-                    std::printf("    [rejete] %s\n", name.c_str());
+                    std::printf("    [rejected] %s\n", name.c_str());
                     continue;
                 }
                 std::printf("    %s\n", name.c_str());
@@ -969,6 +1015,7 @@ int main(int argc, char** argv)
         CUDA_CHECK(cudaEventCreate(&t1));
         CUDA_CHECK(cudaEventRecord(t0, stream));
 
+        const auto progressFrom = std::chrono::steady_clock::now();
         for (uint64_t begin = 0; begin < stems; begin += (uint64_t)o.chunk) {
             uint64_t end = std::min(stems, begin + (uint64_t)o.chunk);
             Search<<<grid, block, smemBytes, stream>>>(
@@ -980,8 +1027,7 @@ int main(int argc, char** argv)
 
             if (stems > (uint64_t)o.chunk) {
                 CUDA_CHECK(cudaStreamSynchronize(stream));
-                std::printf("\r  %5.1f%%", 100.0 * (double)end / (double)stems);
-                std::fflush(stdout);
+                ReportProgress(progressFrom, end, stems, "stems");
             }
         }
         CUDA_CHECK(cudaEventRecord(t1, stream));
@@ -996,7 +1042,7 @@ int main(int argc, char** argv)
         std::vector<uint64_t> hits(take);
         if (take) CUDA_CHECK(cudaMemcpy(hits.data(), dHits, take * sizeof(uint64_t), cudaMemcpyDeviceToHost));
 
-        std::printf("\r  %.1f s, %.3g candidats/s, %u hit(s)%s\n",
+        std::printf("\r  %.1f s, %.3g candidates/s, %u hit(s)%s\n",
                     ms / 1000.0, candidates / (ms / 1000.0), count,
                     count > hitMax ? " (buffer plein)" : "");
 
@@ -1006,7 +1052,7 @@ int main(int argc, char** argv)
             // to a target is a bug in this program, not a discovery, and it should be visible.
             uint64_t h = FnvString(FNV_OFFSET, name.data(), name.size()) & MASK60;
             if (!std::binary_search(targets.begin(), targets.end(), h)) {
-                std::printf("    [rejete] %s\n", name.c_str());
+                std::printf("    [rejected] %s\n", name.c_str());
                 continue;
             }
             std::printf("    %s\n", name.c_str());

@@ -13,8 +13,8 @@ because that one is not bound by the hashing: it writes eight bytes per candidat
 buffer and copies the buffer back to be scanned on the CPU, which caps a run near 10^9 candidates
 a second no matter how cheap the arithmetic gets. Removing that cap is most of what is here.
 
-Measured on an RTX 3090 against `acts` on the same box, same dictionary, same targets: **5.10e8
-candidates/s against 1.46e6, and identical output.** The two agree on every name they find.
+Measured on an RTX 3090: **1.08e10 candidates/s.** The command that produces that figure is in
+[Throughput](#throughput), so you can check it on your own card rather than take the number.
 
 ## The hash
 
@@ -125,25 +125,98 @@ It also reports **collisions**: two different names landing on one 60-bit hash. 
 is the asset, and no amount of hashing will tell you which. Those have to be settled by looking at
 what the name points at.
 
-## What to expect
+### The CSV it writes
 
-Depth is the thing that decides whether a run is possible at all, because cost is
-`prefixes * words^depth`. A real measurement, on a 3090 against 50 635 unresolved Black Ops 4
-hashes with positional vocabularies of 5 000 and 50 000 words:
+`--csv` writes every name the search proposed, whether it survived or not:
 
-| depth | work | wall time |
-|---|---|---|
-| 2 | 4.05e10 backward stems | **10 h 09 min**, 4 470 names |
-| 3 | ~2e15 | ~58 years |
+| column | meaning |
+|---|---|
+| `hash` | the 60-bit FNV-1a of the name in that row, as `hash_<hex>` - recomputed here, never copied from the search's own output, since that is the number being checked |
+| `name` | the candidate string the search produced |
+| `verified` | `yes` if that hash is in the target list, `no` if it is not |
 
-So depth 3 over a full vocabulary is not a longer run, it is a different problem. What moves the
-needle at that point is not more time but a smaller space: a longer prefix, a shorter vocabulary
-at the leading positions, or feeding the words from names you have already recovered back into the
-dictionary.
+`verified` says one thing precisely: the hash is in the list you passed to `--targets`. Check a
+run against the targets it was aimed at and a `no` is a false positive the bitmap let through.
+Check a wider set of names against a narrower target list - everything you have ever recovered
+against what is still unresolved, say - and a `no` only means out of scope. The column does not
+guess which of the two you meant, so the answer depends on the list you hand it.
 
-The prefix table in that run was 100 MB and exceeded the 6 MB L2, which is why it ran at 1.1e6
-stems/s rather than the 5.1e8 candidates/s the flat search reaches. The program says so when it
-happens - if you see `EXCEEDS L2`, move the split before you wait ten hours.
+Keeping the `no` rows rather than dropping them is deliberate. What a disappointing run proposed,
+and how far off it was, is the most useful thing it produced, and two runs cannot be diffed if
+each only lists its winners.
+
+Rows sharing a `hash` with `verified` set to `yes` are the collisions above. Pick one by hand.
+
+## Throughput
+
+Measured on an RTX 3090, one prefix, a flat 50 000-word dictionary at depth 2:
+
+```
+$ ./codehash --targets targets.txt --dict dict_50000.txt --prefix i_c_t8_mp_spe_ --depth 2
+depth 2: 2.5e+09 candidates, ~0.0 expected false hits
+  0.2 s, 1.08e+10 candidates/s, 0 hit(s)
+```
+
+Two caveats worth stating plainly. That is the flat search, where every candidate costs one leaf
+and nothing else. The prefix-table mode is far slower per unit of work - a real run of it managed
+1.11e6 backward stems a second - because each stem probes a table that no longer fits in L2. And
+the comparison against `acts hashbrutedictgpu`, which motivated writing this, is not re-measurable
+here: `acts` is not installed on the machine these numbers come from, so no ratio is quoted. What
+is verifiable by reading `acts` rather than running it is the architectural difference - it writes
+eight bytes per candidate into a buffer and copies that buffer back to be scanned on the CPU, and
+this does not.
+
+## Progress and the ETA
+
+Any run longer than one chunk prints where it is, how fast, and how much is left:
+
+```
+   3.4%  3.33e+05 stems/s  elapsed 25s  left 12m
+```
+
+The estimate is there because the cost of this search is `prefixes * words^depth`, so one more
+dictionary position multiplies the whole run by the size of that position's vocabulary. The
+difference between a setting that finishes overnight and one that finishes in fifty years is not
+visible in the arguments, and without an estimate it is not visible until the end either. With
+one it shows up in the first chunk, while changing your mind is still free.
+
+The rate is averaged over the whole run rather than over the last chunk. Chunk timings wobble, and
+a figure that jumps by a factor of two every second is one nobody trusts enough to act on.
+
+## How long a run takes
+
+Depth decides whether a run is possible at all, and the jump between depths is not a factor of two
+or ten - it is the size of a vocabulary. Against 50 635 unresolved Black Ops 4 hashes with
+positional vocabularies of 5 000 and 50 000 words, on one RTX 3090:
+
+| what | work | time | |
+|---|---|---|---|
+| depth 2, prefix table over 3.0M prefixes | 4.05e10 stems | **10 h 09 min**, 4 470 names | timed |
+| depth 3, same mode | 2.03e15 stems | **~58 years** | from that run's rate |
+| depth 3, flat, one fixed prefix | 1.25e13 candidates | **~20 min** | from the flat rate above |
+
+Only the first row is a stopwatch reading. The other two divide the work by a rate measured on
+this card, which is the right way round: the point of the table is that the difference between
+them is six orders of magnitude, and no amount of precision on the second row changes what to do
+about it.
+
+The second row is not a longer run, it is a different problem, and it is worth understanding why
+the third row is so much cheaper. The prefix-table mode works backwards from the targets against a
+table of three million known prefixes, so it can find a name whose prefix you could not have
+guessed - but every stem probes a 100 MB table that does not fit in L2, and that probe sets the
+pace. The flat search needs you to name the prefix, and in exchange never touches that table.
+
+So when depth 3 is out of reach, the useful moves are not "wait longer":
+
+- **Feed recovered names back into the dictionary.** A run that finds 4 470 names has also found
+  the words in them, and those words were not in the vocabulary the run started with. Rebuilding
+  the dictionary and repeating at depth 2 costs another ten hours and searches somewhere new.
+- **Fix the prefix and go flat.** Twenty minutes per prefix, if you know which prefixes to attack.
+- **Shorten the trailing vocabulary.** In the prefix-table mode, cutting the third position to 20
+  words brings depth 3 down to about 8 days; 50 words is 21 days; 500 is 212 days. Rarely worth it.
+
+If you see `EXCEEDS L2` in the header, move the split or shorten the leading positional lists
+before you wait ten hours to find out what it cost.
 
 ## Files
 
