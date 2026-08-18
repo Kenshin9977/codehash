@@ -258,7 +258,9 @@ Results on the same 50 635 unresolved hashes, each round feeding its finds back 
 | + four feedback rounds | 9 478 | 18.6% | 32 s each |
 | + continuation budget by prefix frequency | 13 293 | 26.1% | 32 s each |
 | + whole vocabulary for directory prefixes | 13 687 | 27.0% | 40 s |
-| + two-word continuations | **15 607** | **30.6%** | 37 s each |
+| + two-word continuations | 15 607 | 30.6% | 37 s each |
+| + budget steered by family yield | 16 673 | 32.9% | 37 s each |
+| + community archive as a prior | **17 823** | **34.9%** | 38 s each |
 
 Two rows deserve a note.
 

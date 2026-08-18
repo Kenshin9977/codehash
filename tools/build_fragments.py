@@ -62,6 +62,18 @@ def main():
                     help='additionally offer each prefix its C likeliest two-word continuations. '
                          'Nothing requires a continuation to be one word, so this reaches names '
                          'with a wholly new two-word middle at the same cost per entry')
+    ap.add_argument('--prior', nargs='*', default=[], metavar='FILE',
+                    help='names used only to learn vocabulary and continuations, never to supply '
+                         'a prefix or a suffix. This is how a database far larger than the search '
+                         'can afford still contributes: the community archive holds three million '
+                         'names across every title, whose fragment lists would need a 34 GB table '
+                         'and carry 394 expected false matches, but whose word statistics cost '
+                         'nothing and nearly double the vocabulary')
+    ap.add_argument('--boost', nargs='*', default=[], metavar='FILE',
+                    help='names whose families should be favoured when the deep budget is handed '
+                         'out. Pass the previous round output here: the families that just paid '
+                         'are the ones with something left to give')
+    ap.add_argument('--boost-weight', type=int, default=200)
     ap.add_argument('--full-vocab-top', type=int, default=0, metavar='N',
                     help='give the N commonest prefixes every word in the vocabulary. Meant for '
                          'directory prefixes: there are only 275 of them, so a complete sweep of '
@@ -72,6 +84,33 @@ def main():
     names = load(args.corpus)
     print('corpus: %d names' % len(names))
 
+    # Rank prefixes by where names are still being found, not by where they already are.
+    #
+    # Ranking on corpus frequency hands the deepest continuation lists to the commonest prefixes,
+    # which is precisely the part of the space that is already exhausted. The measurement is not
+    # subtle: i_mtl_ has 85 164 known names and yields 1.3 new ones per known one, while au_wz_
+    # had ZERO known names and yielded 549. Families the community never covered are where the
+    # unresolved hashes are, which is survivorship bias stated as a search strategy - what you
+    # have already found tells you where you have already looked, not where to look next.
+    #
+    # So a name from the last round counts for two hundred, and its family climbs.
+    boosted = load(args.boost) if args.boost else set()
+    if boosted:
+        print('boost: %d names weighted x%d' % (len(boosted), args.boost_weight))
+
+    prior = load(args.prior) if args.prior else set()
+    if prior:
+        print('prior: %d names, for continuations only' % len(prior))
+
+    def learn(name):
+        tokens = [t for t in name.replace('/', '_').split('_') if t]
+        for token in tokens:
+            vocabulary[token] += 1
+        for a, b in zip(tokens, tokens[1:]):
+            follow[a][b] += 1
+        for a, b, c in zip(tokens, tokens[1:], tokens[2:]):
+            follow2[a][b + '_' + c] += 1
+
     prefix = collections.Counter()
     suffix = collections.Counter()
     follow = collections.defaultdict(collections.Counter)
@@ -79,20 +118,20 @@ def main():
     vocabulary = collections.Counter()
 
     for name in names:
+        weight = args.boost_weight if name in boosted else 1
         for i, ch in enumerate(name):
             if ch in '_/':
-                prefix[name[:i + 1]] += 1
+                prefix[name[:i + 1]] += weight
                 suffix[name[i + 1:]] += 1
 
-        for token in name.replace('/', '_').split('_'):
-            if token:
-                vocabulary[token] += 1
 
-        tokens = [t for t in name.replace('/', '_').split('_') if t]
-        for a, b in zip(tokens, tokens[1:]):
-            follow[a][b] += 1
-        for a, b, c in zip(tokens, tokens[1:], tokens[2:]):
-            follow2[a][b + '_' + c] += 1
+        learn(name)
+
+    # The prior names teach the model and nothing else - no prefix, no suffix, no entry in the
+    # table. They cost a pass over the text and buy a much better answer to "what could follow
+    # this word".
+    for name in prior:
+        learn(name)
 
     # Ordered by frequency throughout, which is the whole prior: where two fragments collide on a
     # state the commoner one wins, and a truncated list keeps the likelier half.

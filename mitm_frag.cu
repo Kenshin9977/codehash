@@ -303,6 +303,24 @@ int main(int argc, char** argv)
     uint32_t slots = 1;
     while ((uint64_t)slots < entries * 2 && slots < (1u << 31)) slots <<= 1;
 
+    // Say whether it fits before spending five minutes building inputs for a table that cannot be
+    // allocated. The slot count is a power of two, so one entry too many doubles the table: 551 M
+    // entries wanted 34.4 GB where 537 M would have wanted 17.2, and four rounds died on that
+    // without a word, because the failure went to stderr while the caller was reading stdout.
+    size_t freeBytes = 0, totalBytes = 0;
+    cudaMemGetInfo(&freeBytes, &totalBytes);
+    const double wanted = slots * 16.0;
+
+    std::printf("table %u slots, %.1f GB of %.1f GB free\n",
+                slots, wanted / 1e9, freeBytes / 1e9);
+
+    if (wanted > (double)freeBytes * 0.92) {
+        std::printf("the table does not fit. Lower --cap, --deep-cap or --bigram-cap until the\n"
+                    "entry count is under %.0f M, where the next smaller power of two holds it.\n",
+                    (double)freeBytes * 0.92 / 32.0 / 1e6);
+        return 1;
+    }
+
     const Packed dPrefix = Upload(prefixes);
     const Packed dWord   = Upload(words);
     const Packed dSuffix = Upload(suffixes);
@@ -331,8 +349,7 @@ int main(int argc, char** argv)
     cudaDeviceProp prop{};
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
     const int grid = prop.multiProcessorCount * 16;
-    std::printf("device %s, table %u slots (%.1f GB), suffix text %.0f MB\n",
-                prop.name, slots, slots * 16.0 / 1e9, dSuffix.bytes / 1e6);
+    std::printf("device %s, suffix text %.0f MB\n", prop.name, dSuffix.bytes / 1e6);
 
     auto started = std::chrono::steady_clock::now();
     Build<<<grid, 256>>>(dPrefix.text, dPrefix.offset, dPrefix.count,
